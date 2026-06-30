@@ -26,7 +26,6 @@ jobs:
       HEADLESS: "true"
       SLOWMO_MS: "0"
       ONLY_STORE: ${{ github.event.inputs.only_store }}
-      SCREENSHOTS_ENABLED: "false"
 
     steps:
       - name: Checkout repo
@@ -42,6 +41,15 @@ jobs:
 
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
+
+      - name: Test WEBAPP_URL
+        run: |
+          echo "Testing WEBAPP_URL..."
+          echo "WEBAPP_URL length: ${#WEBAPP_URL}"
+          curl -L -s -o webapp-response.txt -w "HTTP_STATUS=%{http_code}\n" "$WEBAPP_URL?action=stores"
+          echo "Response preview:"
+          head -c 500 webapp-response.txt
+          echo ""
 
       - name: Run checkout agent
         run: npm run run
