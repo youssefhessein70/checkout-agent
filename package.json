@@ -1,0 +1,15 @@
+{
+  "name": "checkout-agent-starter",
+  "version": "0.1.0",
+  "description": "Generic checkout test-order agent using Playwright and Google Sheets webhook",
+  "type": "module",
+  "scripts": {
+    "install:browsers": "npx playwright install chromium",
+    "run": "node src/run.js",
+    "run:headed": "HEADLESS=false node src/run.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "playwright": "^1.61.1"
+  }
+}

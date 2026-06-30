@@ -1,0 +1,47 @@
+name: Checkout Agent
+
+on:
+  workflow_dispatch:
+    inputs:
+      only_store:
+        description: "Optional store name. Leave empty to run all active stores."
+        required: false
+        default: ""
+      confirmed:
+        description: "Type true to confirm creating TEST orders."
+        required: true
+        default: "false"
+
+jobs:
+  run-checkout-agent:
+    if: ${{ github.event.inputs.confirmed == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+
+    env:
+      WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
+      HEADLESS: "true"
+      SLOWMO_MS: "0"
+      ONLY_STORE: ${{ github.event.inputs.only_store }}
+      SCREENSHOTS_ENABLED: "false"
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run checkout agent
+        run: npm run run
