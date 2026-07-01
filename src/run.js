@@ -155,13 +155,26 @@ async function runStore(browser, store) {
     await page.waitForTimeout(1000);
 
     failedStep = 'place_order';
+    const orderSubmittedAt = new Date().toISOString();
     await clickPlaceOrder(page);
     await page.waitForTimeout(5000);
 
-    failedStep = 'extract_order_number';
-    const pageText = await page.locator('body').innerText({ timeout: 20000 });
-    const currentOrder = extractOrderNumber(pageText) || extractOrderNumber(page.url());
-    if (!currentOrder) throw new Error('Could not find order number on confirmation page');
+    // Primary source for the real customer-facing order number is the confirmation email.
+    // The confirmation page can contain long internal Shopify/Salla IDs, so we wait for
+    // the email and extract the order number from Gmail through Apps Script.
+    failedStep = 'extract_order_email';
+    let currentOrder = await waitForOrderNumberFromEmail(store, orderSubmittedAt, 90000);
+
+    // Fallback only: if the email did not arrive in time, try the confirmation page.
+    if (!currentOrder) {
+      failedStep = 'extract_order_number';
+      currentOrder = await extractOrderNumberFromPage(page);
+    }
+
+    if (!currentOrder) {
+      const debugInfo = await getConfirmationDebugInfo(page);
+      throw new Error(`Could not find order number in confirmation email or confirmation page. ${debugInfo}`);
+    }
 
     const currentNumeric = Number(cleanOrderNumber(currentOrder));
     const previousNumeric = Number(previousOrder);
@@ -179,7 +192,7 @@ async function runStore(browser, store) {
       estimatedOrders,
       status: 'Success',
       failedStep: '',
-      errorMessage: '',
+      errorMessage: ''
     };
   } catch (err) {
     return {
@@ -192,7 +205,7 @@ async function runStore(browser, store) {
       estimatedOrders: '',
       status: 'Failed',
       failedStep,
-      errorMessage: String(err && err.message ? err.message : err),
+      errorMessage: String(err && err.message ? err.message : err)
     };
   } finally {
     await context.close();
@@ -589,6 +602,45 @@ async function logResult(result) {
   if (!data.ok) throw new Error(data.error || 'Apps Script log error');
 }
 
+async function waitForOrderNumberFromEmail(store, sinceIso, timeoutMs = 90000) {
+  const email = String(store['Test Email'] || '').trim();
+  const storeName = String(store['Store Name'] || '').trim();
+  if (!email || !/@/.test(email)) return '';
+
+  const started = Date.now();
+  let lastError = '';
+
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const params = new URLSearchParams({
+        action: 'find_order_email',
+        email,
+        storeName,
+        since: sinceIso
+      });
+      const res = await fetch(`${WEBAPP_URL}?${params.toString()}`);
+      const text = await res.text();
+      if (!res.ok) {
+        lastError = `HTTP ${res.status}: ${text.slice(0, 200)}`;
+      } else {
+        const data = JSON.parse(text);
+        if (data.ok && data.orderNumber) {
+          const value = String(data.orderNumber).trim();
+          if (isLikelyOrderNumber(value)) return value;
+        }
+        lastError = data.error || 'Email order number not found yet';
+      }
+    } catch (err) {
+      lastError = String(err && err.message ? err.message : err);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 10000));
+  }
+
+  console.log(`Email order lookup timed out for ${storeName || email}: ${lastError}`);
+  return '';
+}
+
 async function clickByTexts(page, patterns, label, options = {}) {
   for (const pattern of patterns) {
     const locators = [
@@ -734,18 +786,109 @@ async function dismissPopups(page) {
   }
 }
 
-function extractOrderNumber(text) {
-  const cleanText = String(text || '').replace(/\s+/g, ' ');
-  const patterns = [
-    /(?:confirmation\s*(?:number|no\.?|#)?|order\s*(?:number|no\.?|#)?|رقم\s*(?:تأكيد\s*الطلب|تاكيد\s*الطلب|التأكيد|التاكيد|الطلب|الأوردر|اوردر)|طلبك\s*رقم)\D{0,40}([A-Z]{0,10}[-#]?\d{3,})/i,
-    /(?:تم\s*استلام\s*طلبك|شكراً|شكرا|thank\s*you)\D{0,80}([A-Z]{0,10}[-#]?\d{3,})/i,
-    /#\s*([A-Z]{0,10}[-#]?\d{3,})/i
+async function extractOrderNumberFromPage(page) {
+  const sources = [];
+
+  const url = page.url();
+  const title = await page.title().catch(() => '');
+  const bodyText = await page.locator('body').innerText({ timeout: 20000 }).catch(() => '');
+  const html = await page.content().catch(() => '');
+
+  sources.push(url, title, bodyText, html);
+
+  // Read high-value DOM areas first. Many checkout pages place the confirmation number
+  // in small spans/divs and not in a full sentence.
+  const selectorCandidates = [
+    '[data-testid*="order" i]', '[data-test*="order" i]', '[data-qa*="order" i]',
+    '[class*="order" i]', '[id*="order" i]',
+    '[class*="confirmation" i]', '[id*="confirmation" i]',
+    '[class*="thank" i]', '[id*="thank" i]',
+    'h1', 'h2', 'h3', 'strong', 'b'
   ];
+
+  for (const selector of selectorCandidates) {
+    try {
+      const items = page.locator(selector);
+      const count = await items.count();
+      for (let i = 0; i < Math.min(count, 30); i++) {
+        const txt = await items.nth(i).innerText({ timeout: 700 }).catch(() => '');
+        if (txt) sources.push(txt);
+      }
+    } catch (_) {}
+  }
+
+  for (const source of sources) {
+    const found = extractOrderNumber(source);
+    if (found) return found;
+  }
+
+  return '';
+}
+
+async function getConfirmationDebugInfo(page) {
+  const url = page.url();
+  const title = await page.title().catch(() => '');
+  const text = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+  const compactText = String(text).replace(/\s+/g, ' ').trim().slice(0, 700);
+  return `url=${url} | title=${title} | text=${compactText}`;
+}
+
+function extractOrderNumber(text) {
+  const cleanText = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleanText) return '';
+
+  const patterns = [
+    // Very specific Arabic/Salla/Himas labels around the customer-facing number.
+    /(?:رقم\s*(?:تأكيد\s*الطلب|تاكيد\s*الطلب|التأكيد|التاكيد)\s*)[:：#\-]?\s*#?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    /(?:رقم\s*(?:الطلب|الأوردر|اوردر)\s*)[:：#\-]?\s*#?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    /(?:طلبك\s*(?:رقم)?|طلب\s*رقم)\s*[:：#\-]?\s*#?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    /(?:order\s*(?:number|no\.?|#)?|confirmation\s*(?:number|no\.?|#)?)\s*[:：#\-]?\s*#?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+
+    // Arabic labels around confirmation/order numbers.
+    /(?:رقم\s*(?:تأكيد\s*الطلب|تاكيد\s*الطلب|تأكيد\s*طلبك|تاكيد\s*طلبك|التأكيد|التاكيد|الطلب|الأوردر|اوردر)|كود\s*(?:الطلب|التأكيد|التاكيد)|طلب\s*رقم|طلبك\s*رقم)\s*[:：#\-]?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    // English labels.
+    /(?:confirmation\s*(?:number|no\.?|#)?|order\s*(?:number|no\.?|#)?|order\s*id|order\s*confirmation)\s*[:：#\-]?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    // Common HTML/JSON query style keys.
+    /(?:order_id|orderId|order_number|orderNumber|confirmation_number|confirmationNumber)\s*[=:"'\s]+([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    // Shopify/Salla/Woo style hash close to success words.
+    /(?:تم\s*استلام\s*طلبك|شكراً|شكرا|thank\s*you|confirmed|confirmation|success)\D{0,140}#?\s*([A-Z0-9][A-Z0-9_\-]{1,30})/i,
+    // If the page has a clear hash-prefixed number like #361.
+    /#\s*([A-Z0-9][A-Z0-9_\-]{2,30})/i,
+    // URLs such as /orders/361 or order/361, but avoid random long tokens.
+    /(?:\/orders?\/|[?&](?:order|order_id|order_number)=)([A-Z0-9][A-Z0-9_\-]{2,30})/i
+  ];
+
   for (const pattern of patterns) {
     const match = cleanText.match(pattern);
-    if (match && match[1]) return match[1].replace(/^#/, '').trim();
+    if (match && match[1]) {
+      const value = String(match[1]).replace(/^#/, '').replace(/[.,،:;]+$/g, '').trim();
+      if (isLikelyOrderNumber(value)) return value;
+    }
   }
   return '';
+}
+
+function isLikelyOrderNumber(value) {
+  const v = String(value || '').trim();
+  if (!v) return false;
+
+  // Must contain at least 2 digits; prevents selecting words like "ORDER".
+  const digitCount = (v.match(/\d/g) || []).length;
+  if (digitCount < 2) return false;
+
+  // Reject common phone-like values.
+  if (/^0?1\d{9}$/.test(v) || /^05\d{8}$/.test(v)) return false;
+
+  // Reject very long pure numeric IDs. Shopify/Salla pages often contain internal
+  // checkout/order IDs such as 1668141660 or 1967349596167; these are not the
+  // customer-facing order confirmation number. Public order numbers are usually
+  // short (#361) or alphanumeric with a prefix.
+  if (/^\d{9,}$/.test(v)) return false;
+
+  // Reject timestamps and unix-like numbers.
+  if (/^(16|17|18|19|20)\d{8,}$/.test(v)) return false;
+
+  return /^[A-Z0-9][A-Z0-9_\-]{1,30}$/i.test(v);
 }
 
 function cleanOrderNumber(value) {
