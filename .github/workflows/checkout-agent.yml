@@ -24,7 +24,7 @@ jobs:
     env:
       WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
       HEADLESS: "true"
-      SLOWMO_MS: "500"
+      SLOWMO_MS: "1000"
       ONLY_STORE: ${{ github.event.inputs.only_store }}
 
     steps:
@@ -53,3 +53,4 @@ jobs:
 
       - name: Run checkout agent
         run: npm run run
+
