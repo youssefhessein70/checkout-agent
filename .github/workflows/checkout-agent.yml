@@ -1,4 +1,4 @@
-name: Checkout Agent
+﻿name: Checkout Agent
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
     env:
       WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
       HEADLESS: "true"
-      SLOWMO_MS: "0"
+      SLOWMO_MS: "500"
       ONLY_STORE: ${{ github.event.inputs.only_store }}
 
     steps:
