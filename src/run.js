@@ -1,10 +1,13 @@
 ﻿import 'dotenv/config';
 import { chromium } from 'playwright';
+import fs from 'node:fs/promises';
 
 const WEBAPP_URL = process.env.WEBAPP_URL;
 const HEADLESS = String(process.env.HEADLESS || 'true').toLowerCase() !== 'false';
 const SLOWMO_MS = Number(process.env.SLOWMO_MS || 0);
 const ONLY_STORE = String(process.env.ONLY_STORE || '').trim();
+const DEBUG_SCREENSHOTS = String(process.env.DEBUG_SCREENSHOTS || 'true').toLowerCase() !== 'false';
+const DEBUG_DIR = String(process.env.DEBUG_DIR || 'debug-screenshots').trim();
 
 if (!WEBAPP_URL) {
   console.error('Missing WEBAPP_URL in .env');
@@ -219,6 +222,8 @@ async function runStore(browser, store) {
     };
 
   } catch (err) {
+    const screenshotPath = await saveDebugScreenshot(page, storeName, failedStep);
+
     return {
       timestamp: new Date().toISOString(),
       runId: RUN_ID,
@@ -229,11 +234,51 @@ async function runStore(browser, store) {
       estimatedOrders: '',
       status: 'Failed',
       failedStep,
-      errorMessage: String(err && err.message ? err.message : err)
+      errorMessage: String(err && err.message ? err.message : err),
+      screenshotPath: screenshotPath || ''
     };
 
   } finally {
     await context.close();
+  }
+}
+
+
+async function saveDebugScreenshot(page, storeName, failedStep) {
+  if (!DEBUG_SCREENSHOTS) return '';
+
+  try {
+    await fs.mkdir(DEBUG_DIR, { recursive: true });
+
+    const safeStore = String(storeName || 'store')
+      .replace(/[^a-z0-9_-]+/gi, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'store';
+
+    const safeStep = String(failedStep || 'failed')
+      .replace(/[^a-z0-9_-]+/gi, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'failed';
+
+    const ts = new Date()
+      .toISOString()
+      .replace(/[-:.TZ]/g, '')
+      .slice(0, 14);
+
+    const screenshotPath = `${DEBUG_DIR}/${RUN_ID}_${safeStore}_${safeStep}_${ts}.png`;
+
+    await page.screenshot({
+      path: screenshotPath,
+      fullPage: true
+    });
+
+    console.log(`${storeName}: debug screenshot saved: ${screenshotPath}`);
+
+    return screenshotPath;
+
+  } catch (err) {
+    console.log(`${storeName}: could not save debug screenshot: ${err && err.message ? err.message : err}`);
+    return '';
   }
 }
 

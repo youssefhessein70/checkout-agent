@@ -26,6 +26,8 @@ jobs:
       HEADLESS: "false"
       SLOWMO_MS: "1000"
       ONLY_STORE: ${{ github.event.inputs.only_store }}
+      DEBUG_SCREENSHOTS: "true"
+      DEBUG_DIR: "debug-screenshots"
 
     steps:
       - name: Checkout repo
@@ -53,6 +55,15 @@ jobs:
 
       - name: Run checkout agent
         run: xvfb-run -a npm run run
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkout-debug-screenshots
+          path: debug-screenshots/
+          if-no-files-found: ignore
+          retention-days: 1
+
 
 
 
