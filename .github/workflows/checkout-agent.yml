@@ -23,7 +23,7 @@ jobs:
 
     env:
       WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
-      HEADLESS: "true"
+      HEADLESS: "false"
       SLOWMO_MS: "1000"
       ONLY_STORE: ${{ github.event.inputs.only_store }}
 
@@ -52,5 +52,6 @@ jobs:
           echo ""
 
       - name: Run checkout agent
-        run: npm run run
+        run: xvfb-run -a npm run run
+
 
