@@ -196,20 +196,20 @@ async function runStore(browser, store) {
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(15000);
 
-    failedStep = 'extract_order_number';
+    failedStep = 'extract_order_email';
 
-    console.log(`${storeName}: extracting order number from confirmation page...`);
+    console.log(`${storeName}: waiting for order number from confirmation email only...`);
 
-    let currentOrder = await extractOrderNumberFromPage(page);
+    let currentOrder = await waitForOrderNumberFromEmail(store, orderSubmittedAt, 120000);
 
     if (!currentOrder) {
       const debugInfo = await getConfirmationDebugInfo(page);
       throw new Error(
-        `Order number not found on confirmation page. Email fallback disabled to avoid old order numbers. ${debugInfo}`
+        `Could not find order number in confirmation email. Email is the only source of truth. ${debugInfo}`
       );
     }
 
-    console.log(`${storeName}: order number found: ${currentOrder}`);
+    console.log(`${storeName}: email order number found: ${currentOrder}`);
 
     const currentClean = cleanOrderNumber(currentOrder);
     const previousClean = cleanOrderNumber(previousOrder);
