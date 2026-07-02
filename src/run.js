@@ -155,6 +155,8 @@ async function runStore(browser, store) {
 
     failedStep = 'product_to_checkout';
     await startCheckoutFromStore(page, storeUrl, configuredProductUrl);
+    await page.waitForTimeout(2000);
+    await saveDebugCheckpoint(page, storeName, '01_after_product_to_checkout');
 
     await page.waitForTimeout(2500);
     await dismissPopups(page);
@@ -165,20 +167,29 @@ async function runStore(browser, store) {
     }
 
     failedStep = 'fill_checkout_form';
+    await saveDebugCheckpoint(page, storeName, '02_before_fill_checkout');
     await fillCheckoutForm(page, store);
+    await page.waitForTimeout(2000);
+    await saveDebugCheckpoint(page, storeName, '03_after_fill_checkout');
 
     await page.waitForTimeout(1000);
 
     failedStep = 'select_payment';
+    await saveDebugCheckpoint(page, storeName, '04_before_select_payment');
     await selectPayment(page, String(store['Payment Method'] || ''));
+    await page.waitForTimeout(2000);
+    await saveDebugCheckpoint(page, storeName, '05_after_select_payment');
 
     await page.waitForTimeout(1000);
 
     failedStep = 'place_order';
+    await saveDebugCheckpoint(page, storeName, '06_before_place_order');
 
     const orderSubmittedAt = new Date().toISOString();
 
     await clickPlaceOrder(page);
+    await page.waitForTimeout(8000);
+    await saveDebugCheckpoint(page, storeName, '07_after_place_order_click');
 
     await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
     await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
@@ -286,6 +297,244 @@ async function saveDebugScreenshot(page, storeName, failedStep) {
     return '';
   }
 }
+
+
+
+async function saveDebugCheckpoint(page, storeName, stepName) {
+  if (!DEBUG_SCREENSHOTS) return;
+
+  try {
+    await saveViewportDebugScreenshot(page, storeName, stepName + '_viewport');
+  } catch (err) {
+    console.log(`${storeName}: viewport screenshot failed at ${stepName}: ${err && err.message ? err.message : err}`);
+  }
+
+  try {
+    await saveDebugScreenshot(page, storeName, stepName + '_fullpage');
+  } catch (err) {
+    console.log(`${storeName}: fullpage screenshot failed at ${stepName}: ${err && err.message ? err.message : err}`);
+  }
+
+  try {
+    await saveCheckoutDebugDump(page, storeName, stepName);
+  } catch (err) {
+    console.log(`${storeName}: debug dump failed at ${stepName}: ${err && err.message ? err.message : err}`);
+  }
+}
+
+async function saveViewportDebugScreenshot(page, storeName, stepName) {
+  if (!DEBUG_SCREENSHOTS) return '';
+
+  await fs.mkdir(DEBUG_DIR, { recursive: true });
+
+  const safeStore = String(storeName || 'store')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'store';
+
+  const safeStep = String(stepName || 'step')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'step';
+
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:.TZ]/g, '')
+    .slice(0, 14);
+
+  const screenshotPath = `${DEBUG_DIR}/${RUN_ID}_${safeStore}_${safeStep}_${ts}.png`;
+
+  await page.screenshot({
+    path: screenshotPath,
+    fullPage: false
+  });
+
+  console.log(`${storeName}: viewport screenshot saved: ${screenshotPath}`);
+
+  return screenshotPath;
+}
+
+async function saveCheckoutDebugDump(page, storeName, stepName) {
+  if (!DEBUG_SCREENSHOTS) return '';
+
+  await fs.mkdir(DEBUG_DIR, { recursive: true });
+
+  const safeStore = String(storeName || 'store')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60) || 'store';
+
+  const safeStep = String(stepName || 'step')
+    .replace(/[^a-z0-9_-]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'step';
+
+  const ts = new Date()
+    .toISOString()
+    .replace(/[-:.TZ]/g, '')
+    .slice(0, 14);
+
+  const dumpPath = `${DEBUG_DIR}/${RUN_ID}_${safeStore}_${safeStep}_${ts}.txt`;
+
+  const data = await page.evaluate(() => {
+    function visible(el) {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+      return rect.width > 0 &&
+        rect.height > 0 &&
+        style.display !== 'none' &&
+        style.visibility !== 'hidden';
+    }
+
+    function labelFor(el) {
+      const id = el.getAttribute('id') || '';
+      let label = '';
+
+      if (id) {
+        const labelEl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+        if (labelEl) label = labelEl.innerText || labelEl.textContent || '';
+      }
+
+      if (!label) {
+        const parentLabel = el.closest('label');
+        if (parentLabel) label = parentLabel.innerText || parentLabel.textContent || '';
+      }
+
+      if (!label) {
+        const wrapper = el.closest('div, section, p');
+        if (wrapper) label = (wrapper.innerText || wrapper.textContent || '').slice(0, 160);
+      }
+
+      return String(label || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function fieldInfo(el, index) {
+      const tag = el.tagName.toLowerCase();
+      const rect = el.getBoundingClientRect();
+
+      let value = '';
+      let selectedText = '';
+
+      if (tag === 'select') {
+        value = el.value || '';
+        selectedText = el.selectedOptions && el.selectedOptions[0]
+          ? (el.selectedOptions[0].textContent || '').trim()
+          : '';
+      } else {
+        value = el.value || '';
+      }
+
+      return {
+        index,
+        tag,
+        type: el.getAttribute('type') || '',
+        id: el.getAttribute('id') || '',
+        name: el.getAttribute('name') || '',
+        autocomplete: el.getAttribute('autocomplete') || '',
+        placeholder: el.getAttribute('placeholder') || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
+        label: labelFor(el),
+        value,
+        selectedText,
+        required: !!el.required,
+        disabled: !!el.disabled,
+        readOnly: !!el.readOnly,
+        ariaInvalid: el.getAttribute('aria-invalid') || '',
+        validationMessage: el.validationMessage || '',
+        className: String(el.className || ''),
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          w: Math.round(rect.width),
+          h: Math.round(rect.height)
+        }
+      };
+    }
+
+    function buttonInfo(el, index) {
+      return {
+        index,
+        tag: el.tagName.toLowerCase(),
+        type: el.getAttribute('type') || '',
+        id: el.getAttribute('id') || '',
+        name: el.getAttribute('name') || '',
+        text: [
+          el.innerText,
+          el.textContent,
+          el.value,
+          el.getAttribute('aria-label'),
+          el.getAttribute('title')
+        ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim().slice(0, 200),
+        disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true',
+        className: String(el.className || '')
+      };
+    }
+
+    const fields = Array.from(document.querySelectorAll('input, textarea, select'))
+      .filter(visible)
+      .map(fieldInfo);
+
+    const buttons = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a, [role="button"]'))
+      .filter(visible)
+      .map(buttonInfo);
+
+    const alerts = Array.from(document.querySelectorAll('[role="alert"], [aria-live], .error, .errors, .field__message, .notice, .banner, .message'))
+      .filter(visible)
+      .map(el => (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 50);
+
+    const active = document.activeElement ? {
+      tag: document.activeElement.tagName.toLowerCase(),
+      id: document.activeElement.getAttribute('id') || '',
+      name: document.activeElement.getAttribute('name') || '',
+      type: document.activeElement.getAttribute('type') || '',
+      label: labelFor(document.activeElement),
+      value: document.activeElement.value || '',
+      text: (document.activeElement.innerText || document.activeElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+    } : null;
+
+    return {
+      url: location.href,
+      title: document.title,
+      active,
+      fields,
+      buttons,
+      alerts,
+      bodyTextStart: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 1500)
+    };
+  });
+
+  const content = [
+    `RUN_ID: ${RUN_ID}`,
+    `STORE: ${storeName}`,
+    `STEP: ${stepName}`,
+    `URL: ${data.url}`,
+    `TITLE: ${data.title}`,
+    '',
+    'ACTIVE ELEMENT:',
+    JSON.stringify(data.active, null, 2),
+    '',
+    'VISIBLE FIELDS:',
+    JSON.stringify(data.fields, null, 2),
+    '',
+    'VISIBLE BUTTONS:',
+    JSON.stringify(data.buttons, null, 2),
+    '',
+    'ALERTS / VALIDATION TEXTS:',
+    JSON.stringify(data.alerts, null, 2),
+    '',
+    'BODY TEXT START:',
+    data.bodyTextStart
+  ].join('\n');
+
+  await fs.writeFile(dumpPath, content, 'utf8');
+
+  console.log(`${storeName}: checkout debug dump saved: ${dumpPath}`);
+
+  return dumpPath;
+}
+
 
 function normalizeOptionalUrl(value) {
   const raw = String(value || '').trim();
