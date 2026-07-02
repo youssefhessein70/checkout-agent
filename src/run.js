@@ -169,6 +169,7 @@ async function runStore(browser, store) {
     failedStep = 'fill_checkout_form';
     await saveDebugCheckpoint(page, storeName, '02_before_fill_checkout');
     await fillCheckoutForm(page, store);
+    await selectShippingProvince(page, store);
     await page.waitForTimeout(2000);
     await saveDebugCheckpoint(page, storeName, '03_after_fill_checkout');
 
@@ -1261,6 +1262,115 @@ async function clickByTexts(page, patterns, label, options = {}) {
   throw new Error(`${label} button not found`);
 }
 
+
+async function selectShippingProvince(page, store) {
+  const preferredProvince = String(
+    store['Test Province'] ||
+    store['Test State'] ||
+    store['Test Governorate'] ||
+    'محافظة القاهرة'
+  ).trim();
+
+  const preferredPatterns = [
+    new RegExp(escapeRegExp(preferredProvince), 'i'),
+    /محافظة\s*القاهرة/i,
+    /القاهرة/i,
+    /cairo/i
+  ];
+
+  const selectors = [
+    'select[name="zone"]',
+    'select[id*="zone" i]',
+    'select[name*="province" i]',
+    'select[name*="state" i]',
+    'select[autocomplete*="address-level1" i]',
+    'select'
+  ];
+
+  for (const selector of selectors) {
+    const selects = page.locator(selector);
+    const count = await selects.count().catch(() => 0);
+
+    for (let i = 0; i < Math.min(count, 20); i++) {
+      const select = selects.nth(i);
+
+      try {
+        if (!(await select.isVisible({ timeout: 500 }).catch(() => false))) continue;
+
+        const meta = await select.evaluate(node => {
+          const id = node.getAttribute('id') || '';
+          const name = node.getAttribute('name') || '';
+          const autocomplete = node.getAttribute('autocomplete') || '';
+          const aria = node.getAttribute('aria-label') || '';
+          let label = '';
+
+          if (id) {
+            const labelEl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+            if (labelEl) label = labelEl.innerText || labelEl.textContent || '';
+          }
+
+          const optionsText = Array.from(node.options || [])
+            .map(o => o.textContent || '')
+            .join(' ');
+
+          return [id, name, autocomplete, aria, label, optionsText]
+            .filter(Boolean)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        });
+
+        const looksLikeProvince =
+          /zone|province|state|address-level1|محافظة|القاهرة|الإسكندرية|الجيزة/i.test(meta);
+
+        if (!looksLikeProvince) continue;
+
+        const options = await select.locator('option').evaluateAll(opts => opts.map(o => ({
+          value: o.value,
+          text: (o.textContent || '').replace(/\s+/g, ' ').trim(),
+          disabled: o.disabled,
+          selected: o.selected
+        })));
+
+        const validOptions = options.filter(o =>
+          o.value &&
+          !o.disabled &&
+          !/select|choose|اختر|اختار|province|state|الرجاء/i.test(o.text)
+        );
+
+        if (!validOptions.length) continue;
+
+        let chosen = validOptions.find(o =>
+          preferredPatterns.some(pattern => pattern.test(o.text) || pattern.test(o.value))
+        );
+
+        if (!chosen) {
+          chosen = validOptions[0];
+        }
+
+        await select.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+        await select.selectOption(chosen.value, { timeout: 5000 });
+
+        await page.waitForTimeout(1500);
+
+        const selected = await select.evaluate(node => ({
+          value: node.value || '',
+          text: node.selectedOptions && node.selectedOptions[0]
+            ? (node.selectedOptions[0].textContent || '').trim()
+            : ''
+        }));
+
+        console.log(`Selected province/state: ${selected.text || selected.value}`);
+
+        if (selected.value) return true;
+
+      } catch (_) {}
+    }
+  }
+
+  throw new Error('Could not select shipping province/state');
+}
+
 async function fillCheckoutForm(page, store) {
   const fullName = String(store['Test Name'] || 'TEST ORDER DO NOT SHIP');
   const email = String(store['Test Email'] || 'test@example.com');
@@ -1576,4 +1686,5 @@ main().catch(err => {
   console.error(err);
   process.exit(1);
 });
+
 
