@@ -159,6 +159,11 @@ async function runStore(browser, store) {
     await page.waitForTimeout(2500);
     await dismissPopups(page);
 
+    if (!(await isStrictCheckoutPage(page))) {
+      const debugInfo = await getConfirmationDebugInfo(page);
+      throw new Error(`Did not reach real checkout after product selection. ${debugInfo}`);
+    }
+
     failedStep = 'fill_checkout_form';
     await fillCheckoutForm(page, store);
 
@@ -473,57 +478,178 @@ async function tryProductAndStartCheckout(page, productUrl, origin) {
     timeout: 60000
   });
 
-  await page.waitForTimeout(1800);
+  await page.waitForTimeout(2500);
   await dismissPopups(page);
 
   await selectProductOptions(page);
 
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1500);
   await dismissPopups(page);
 
-  if (await isProductUnavailable(page)) return false;
-
-  if (await clickByTexts(page, buyNowTexts, 'Buy now', { optional: true })) {
-    await page.waitForTimeout(2500);
-    await dismissPopups(page);
-
-    if (isCheckoutUrl(page.url()) || await looksLikeCheckoutPage(page)) return true;
+  if (await isProductUnavailable(page)) {
+    return false;
   }
 
+  // 1) Try Buy Now first
+  if (await clickByTexts(page, buyNowTexts, 'Buy now', { optional: true })) {
+    await waitAfterProductAction(page);
+
+    if (await isStrictCheckoutPage(page)) {
+      return true;
+    }
+
+    if (await moveFromCartOrDrawerToCheckout(page, origin)) {
+      return true;
+    }
+
+    // If still on product page, do not pretend success.
+    if (isProductPageUrl(page.url())) {
+      console.log('Buy now clicked but still on product page. Trying add to cart path...');
+    }
+  }
+
+  await dismissPopups(page);
+
+  // 2) Try Add to Cart
   const added = await clickByTexts(page, addToCartTexts, 'Add to cart', { optional: true });
 
-  if (!added) return false;
-
-  await page.waitForTimeout(1800);
-  await dismissPopups(page);
-
-  if (isCheckoutUrl(page.url()) || await looksLikeCheckoutPage(page)) return true;
-
-  if (await clickByTexts(page, checkoutTexts, 'Checkout', { optional: true })) {
-    await page.waitForTimeout(2500);
-
-    if (isCheckoutUrl(page.url()) || await looksLikeCheckoutPage(page)) return true;
+  if (!added) {
+    return false;
   }
 
-  await page.goto(`${origin}/checkout`, {
-    waitUntil: 'domcontentloaded',
-    timeout: 60000
-  }).catch(async () => {
+  await waitAfterProductAction(page);
+
+  if (await isStrictCheckoutPage(page)) {
+    return true;
+  }
+
+  if (await moveFromCartOrDrawerToCheckout(page, origin)) {
+    return true;
+  }
+
+  // 3) Direct cart fallback after add-to-cart
+  if (await openCartThenCheckout(page, origin)) {
+    return true;
+  }
+
+  // Important: if GitHub is still on /products/, this product failed.
+  if (isProductPageUrl(page.url())) {
+    console.log('Add to cart did not move to cart/checkout. Product failed:', productUrl);
+    return false;
+  }
+
+  return await isStrictCheckoutPage(page);
+}
+
+async function waitAfterProductAction(page) {
+  await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(5000);
+  await dismissPopups(page);
+}
+
+function isProductPageUrl(url) {
+  return /\/products?\//i.test(String(url || ''));
+}
+
+function isCollectionPageUrl(url) {
+  return /\/collections?\//i.test(String(url || ''));
+}
+
+async function isStrictCheckoutPage(page) {
+  const url = page.url();
+
+  // Product/listing pages must never be treated as checkout.
+  if (isProductPageUrl(url)) return false;
+  if (isCollectionPageUrl(url)) return false;
+
+  // Strong checkout URL signals.
+  if (/\/checkouts?(\/|$|\?)/i.test(url)) return true;
+  if (/\/checkout(\/|$|\?)/i.test(url)) return true;
+  if (/checkout\.shopify\.com/i.test(url)) return true;
+
+  const text = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+  const compact = String(text || '').replace(/\s+/g, ' ').trim();
+
+  const hasCheckoutTitle = /(الدفع|checkout|shipping|payment|billing|إتمام\s*الطلب|اتمام\s*الطلب)/i.test(compact);
+  const hasContactField = /(البريد\s*الإلكتروني|البريد الإلكتروني|البريد|email|e-mail|رقم\s*الهاتف|هاتف|phone|mobile)/i.test(compact);
+  const hasAddressField = /(العنوان|address|city|مدينة|محافظة|state|province|country|البلد|المنطقة)/i.test(compact);
+  const hasSubmitLike = /(الطلب\s*الكامل|تأكيد\s*الطلب|تاكيد\s*الطلب|إتمام\s*الطلب|اتمام\s*الطلب|complete\s*order|place\s*order|pay\s*now)/i.test(compact);
+
+  return hasCheckoutTitle && hasContactField && hasAddressField && hasSubmitLike;
+}
+
+async function moveFromCartOrDrawerToCheckout(page, origin) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (await isStrictCheckoutPage(page)) {
+      return true;
+    }
+
+    await dismissPopups(page);
+
+    const clickedCheckout = await clickByTexts(page, checkoutTexts, 'Checkout', { optional: true });
+
+    if (clickedCheckout) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(4000);
+
+      if (await isStrictCheckoutPage(page)) {
+        return true;
+      }
+    }
+
+    await page.waitForTimeout(1500);
+  }
+
+  return false;
+}
+
+async function openCartThenCheckout(page, origin) {
+  try {
     await page.goto(`${origin}/cart`, {
       waitUntil: 'domcontentloaded',
       timeout: 60000
     });
-  });
 
-  await page.waitForTimeout(1500);
-  await dismissPopups(page);
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(2500);
+    await dismissPopups(page);
 
-  if (!isCheckoutUrl(page.url()) && !(await looksLikeCheckoutPage(page))) {
-    await clickByTexts(page, checkoutTexts, 'Checkout', { optional: true });
-    await page.waitForTimeout(2000);
+    const cartText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+
+    if (/cart\s*is\s*empty|empty\s*cart|سلة\s*التسوق\s*فارغة|السلة\s*فارغة|لا\s*توجد\s*منتجات/i.test(cartText)) {
+      return false;
+    }
+
+    if (await isStrictCheckoutPage(page)) {
+      return true;
+    }
+
+    if (await clickByTexts(page, checkoutTexts, 'Checkout from cart', { optional: true })) {
+      await page.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+      await page.waitForTimeout(4000);
+
+      if (await isStrictCheckoutPage(page)) {
+        return true;
+      }
+    }
+
+    // Direct checkout fallback only after we opened cart.
+    await page.goto(`${origin}/checkout`, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    }).catch(() => {});
+
+    await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+    await page.waitForTimeout(4000);
+
+    return await isStrictCheckoutPage(page);
+
+  } catch (_) {
+    return false;
   }
-
-  return isCheckoutUrl(page.url()) || await looksLikeCheckoutPage(page);
 }
 
 async function collectProductCandidates(page, storeUrl) {
