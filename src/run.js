@@ -1012,6 +1012,192 @@ async function clickByTexts(page, patterns, label, options = {}) {
   throw new Error(`${label} button not found`);
 }
 
+
+async function waitForCheckoutFields(page) {
+  // Shopify checkout can load slowly on GitHub/Xvfb.
+  // Wait until real checkout inputs are visible before filling.
+  for (let i = 0; i < 20; i++) {
+    const fieldsCount = await page.locator('input:visible, textarea:visible, select:visible').count().catch(() => 0);
+    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '');
+
+    const hasContact = /(البريد|email|e-mail|الهاتف|phone|mobile)/i.test(bodyText);
+    const hasAddress = /(العنوان|address|مدينة|city|محافظة|province|state)/i.test(bodyText);
+
+    if (fieldsCount >= 5 && hasContact && hasAddress) {
+      await page.waitForTimeout(3000);
+      return true;
+    }
+
+    await page.waitForTimeout(1000);
+  }
+
+  throw new Error('Checkout fields did not become ready');
+}
+
+async function verifyCheckoutFormFilled(page, store) {
+  const email = String(store['Test Email'] || '').trim();
+  const phone = normalizeCheckoutPhone(String(store['Test Phone'] || '01000000000'));
+  const address = String(store['Test Address1'] || 'TEST ADDRESS DO NOT SHIP').trim();
+  const city = String(store['Test City'] || 'Cairo').trim();
+
+  // Fill again with robust hint-based method in case normal selectors missed Shopify fields.
+  await fillCheckoutFieldByHints(page, [/email/i, /البريد/i, /الايميل/i, /إيميل/i], email);
+  await fillCheckoutFieldByHints(page, [/phone/i, /mobile/i, /tel/i, /هاتف/i, /الهاتف/i, /المحمول/i], phone);
+  await fillCheckoutFieldByHints(page, [/address/i, /street/i, /العنوان/i], address);
+  await fillCheckoutFieldByHints(page, [/city/i, /المدينة/i, /مدينة/i], city);
+
+  // Choose Egypt state/province explicitly. Shopify sometimes leaves it on placeholder in GitHub.
+  await chooseCheckoutSelectOption(page, [/province/i, /state/i, /محافظة/i, /state\s*\/\s*province/i], [/القاهرة/i, /cairo/i, /محافظة القاهرة/i]);
+
+  await page.waitForTimeout(2000);
+
+  const validationText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
+
+  if (/Select a state \/ province/i.test(validationText)) {
+    throw new Error('Checkout province/state is still not selected');
+  }
+
+  return true;
+}
+
+function normalizeCheckoutPhone(value) {
+  let phone = String(value || '').replace(/\D/g, '');
+
+  if (!phone) return '01000000000';
+
+  if (phone.startsWith('20') && phone.length === 12) {
+    phone = '0' + phone.slice(2);
+  }
+
+  if (phone.length === 10 && phone.startsWith('1')) {
+    phone = '0' + phone;
+  }
+
+  if (phone.length < 11) {
+    phone = '01000000000';
+  }
+
+  return phone;
+}
+
+async function fillCheckoutFieldByHints(page, hints, value) {
+  const fields = page.locator('input, textarea');
+  const count = await fields.count().catch(() => 0);
+
+  for (let i = 0; i < Math.min(count, 100); i++) {
+    const el = fields.nth(i);
+
+    try {
+      if (!(await el.isVisible({ timeout: 500 }).catch(() => false))) continue;
+
+      const type = await el.getAttribute('type').catch(() => '');
+      if (/hidden|checkbox|radio|submit|button/i.test(String(type))) continue;
+
+      const info = await el.evaluate(node => {
+        const id = node.getAttribute('id') || '';
+        const name = node.getAttribute('name') || '';
+        const placeholder = node.getAttribute('placeholder') || '';
+        const aria = node.getAttribute('aria-label') || '';
+        const autocomplete = node.getAttribute('autocomplete') || '';
+        const type = node.getAttribute('type') || '';
+        let label = '';
+
+        if (id) {
+          const labelEl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+          if (labelEl) label = labelEl.innerText || labelEl.textContent || '';
+        }
+
+        const parentText = node.closest('label, div, section')?.innerText || '';
+
+        return [id, name, placeholder, aria, autocomplete, type, label, parentText]
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      });
+
+      if (!hints.some(pattern => pattern.test(info))) continue;
+
+      await el.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+      await el.click({ timeout: 2000 }).catch(() => {});
+      await el.fill(String(value), { timeout: 5000 }).catch(async () => {
+        await page.keyboard.press('Control+A').catch(() => {});
+        await page.keyboard.type(String(value), { delay: 25 }).catch(() => {});
+      });
+
+      await page.waitForTimeout(500);
+      return true;
+
+    } catch (_) {}
+  }
+
+  return false;
+}
+
+async function chooseCheckoutSelectOption(page, selectHints, preferredOptions) {
+  const selects = page.locator('select');
+  const count = await selects.count().catch(() => 0);
+
+  for (let i = 0; i < Math.min(count, 30); i++) {
+    const select = selects.nth(i);
+
+    try {
+      if (!(await select.isVisible({ timeout: 500 }).catch(() => false))) continue;
+
+      const meta = await select.evaluate(node => {
+        const id = node.getAttribute('id') || '';
+        const name = node.getAttribute('name') || '';
+        const aria = node.getAttribute('aria-label') || '';
+        let label = '';
+
+        if (id) {
+          const labelEl = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+          if (labelEl) label = labelEl.innerText || labelEl.textContent || '';
+        }
+
+        const options = Array.from(node.options || []).map(o => o.textContent || '').join(' ');
+
+        return [id, name, aria, label, options]
+          .filter(Boolean)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+      });
+
+      if (!selectHints.some(pattern => pattern.test(meta))) continue;
+
+      const options = await select.locator('option').evaluateAll(opts => opts.map(o => ({
+        value: o.value,
+        text: o.textContent || '',
+        disabled: o.disabled
+      })));
+
+      const validOptions = options.filter(o =>
+        o.value &&
+        !o.disabled &&
+        !/select|choose|اختر|اختار|province|state|الرجاء/i.test(o.text)
+      );
+
+      if (!validOptions.length) continue;
+
+      let chosen = validOptions.find(o =>
+        preferredOptions.some(pattern => pattern.test(o.text) || pattern.test(o.value))
+      );
+
+      if (!chosen) chosen = validOptions[0];
+
+      await select.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+      await select.selectOption(chosen.value, { timeout: 5000 }).catch(() => {});
+      await page.waitForTimeout(1000);
+
+      return true;
+
+    } catch (_) {}
+  }
+
+  return false;
+}
+
 async function fillCheckoutForm(page, store) {
   const fullName = String(store['Test Name'] || 'TEST ORDER DO NOT SHIP');
   const email = String(store['Test Email'] || 'test@example.com');
@@ -1327,4 +1513,5 @@ main().catch(err => {
   console.error(err);
   process.exit(1);
 });
+
 
