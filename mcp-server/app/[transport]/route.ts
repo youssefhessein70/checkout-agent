@@ -1,4 +1,3 @@
-
 import { createMcpHandler } from 'mcp-handler';
 import { z } from 'zod';
 
@@ -90,146 +89,153 @@ function textResult(data: unknown) {
   };
 }
 
-const mcpHandler = createMcpHandler((server) => {
-  server.tool(
-    'runCheckoutAgent',
-    'Trigger the checkout-agent GitHub Actions workflow.',
-    {
-      only_store: z
-        .string()
-        .optional()
-        .describe('Store name to run. Empty string runs all active stores.'),
-      ref: z.string().optional().default(getBranch())
-    },
-    async ({ only_store = '', ref = getBranch() }) => {
-      const repo = getRepoFullName();
-      const workflow = getWorkflowFile();
+const mcpHandler = createMcpHandler(
+  (server) => {
+    server.tool(
+      'runCheckoutAgent',
+      'Trigger the checkout-agent GitHub Actions workflow.',
+      {
+        only_store: z
+          .string()
+          .optional()
+          .describe('Store name to run. Empty string runs all active stores.'),
+        ref: z.string().optional().default(getBranch())
+      },
+      async ({ only_store = '', ref = getBranch() }) => {
+        const repo = getRepoFullName();
+        const workflow = getWorkflowFile();
 
-      await githubRequest(`/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
-        method: 'POST',
-        body: {
-          ref,
-          inputs: {
-            only_store: only_store || '',
-            confirmed: 'true'
+        await githubRequest(`/repos/${repo}/actions/workflows/${workflow}/dispatches`, {
+          method: 'POST',
+          body: {
+            ref,
+            inputs: {
+              only_store: only_store || '',
+              confirmed: 'true'
+            }
           }
-        }
-      });
+        });
 
-      return textResult({
-        ok: true,
-        message: 'checkout-agent workflow dispatch accepted',
-        repo,
-        workflow,
-        ref,
-        only_store: only_store || ''
-      });
-    }
-  );
+        return textResult({
+          ok: true,
+          message: 'checkout-agent workflow dispatch accepted',
+          repo,
+          workflow,
+          ref,
+          only_store: only_store || ''
+        });
+      }
+    );
 
-  server.tool(
-    'getLatestCheckoutRuns',
-    'Get recent GitHub Actions workflow runs for checkout-agent.',
-    {
-      per_page: z.number().int().min(1).max(20).optional().default(5),
-      branch: z.string().optional().default(getBranch()),
-      event: z.string().optional()
-    },
-    async ({ per_page = 5, branch = getBranch(), event }) => {
-      const repo = getRepoFullName();
+    server.tool(
+      'getLatestCheckoutRuns',
+      'Get recent GitHub Actions workflow runs for checkout-agent.',
+      {
+        per_page: z.number().int().min(1).max(20).optional().default(5),
+        branch: z.string().optional().default(getBranch()),
+        event: z.string().optional()
+      },
+      async ({ per_page = 5, branch = getBranch(), event }) => {
+        const repo = getRepoFullName();
 
-      const data = await githubRequest(`/repos/${repo}/actions/runs`, {
-        query: {
-          per_page,
-          branch,
-          event
-        }
-      });
+        const data = await githubRequest(`/repos/${repo}/actions/runs`, {
+          query: {
+            per_page,
+            branch,
+            event
+          }
+        });
 
-      const runs = (data?.workflow_runs || []).map((run: any) => ({
-        id: run.id,
-        name: run.name,
-        event: run.event,
-        status: run.status,
-        conclusion: run.conclusion,
-        workflow_id: run.workflow_id,
-        head_branch: run.head_branch,
-        created_at: run.created_at,
-        updated_at: run.updated_at,
-        html_url: run.html_url
-      }));
+        const runs = (data?.workflow_runs || []).map((run: any) => ({
+          id: run.id,
+          name: run.name,
+          event: run.event,
+          status: run.status,
+          conclusion: run.conclusion,
+          workflow_id: run.workflow_id,
+          head_branch: run.head_branch,
+          created_at: run.created_at,
+          updated_at: run.updated_at,
+          html_url: run.html_url
+        }));
 
-      return textResult({
-        ok: true,
-        runs
-      });
-    }
-  );
+        return textResult({
+          ok: true,
+          runs
+        });
+      }
+    );
 
-  server.tool(
-    'getCheckoutRunJobs',
-    'Get jobs and steps for a specific GitHub Actions workflow run.',
-    {
-      run_id: z.number().int().positive()
-    },
-    async ({ run_id }) => {
-      const repo = getRepoFullName();
+    server.tool(
+      'getCheckoutRunJobs',
+      'Get jobs and steps for a specific GitHub Actions workflow run.',
+      {
+        run_id: z.number().int().positive()
+      },
+      async ({ run_id }) => {
+        const repo = getRepoFullName();
 
-      const data = await githubRequest(`/repos/${repo}/actions/runs/${run_id}/jobs`);
+        const data = await githubRequest(`/repos/${repo}/actions/runs/${run_id}/jobs`);
 
-      const jobs = (data?.jobs || []).map((job: any) => ({
-        id: job.id,
-        name: job.name,
-        status: job.status,
-        conclusion: job.conclusion,
-        started_at: job.started_at,
-        completed_at: job.completed_at,
-        html_url: job.html_url,
-        steps: (job.steps || []).map((step: any) => ({
-          name: step.name,
-          status: step.status,
-          conclusion: step.conclusion,
-          number: step.number,
-          started_at: step.started_at,
-          completed_at: step.completed_at
-        }))
-      }));
+        const jobs = (data?.jobs || []).map((job: any) => ({
+          id: job.id,
+          name: job.name,
+          status: job.status,
+          conclusion: job.conclusion,
+          started_at: job.started_at,
+          completed_at: job.completed_at,
+          html_url: job.html_url,
+          steps: (job.steps || []).map((step: any) => ({
+            name: step.name,
+            status: step.status,
+            conclusion: step.conclusion,
+            number: step.number,
+            started_at: step.started_at,
+            completed_at: step.completed_at
+          }))
+        }));
 
-      return textResult({
-        ok: true,
-        jobs
-      });
-    }
-  );
+        return textResult({
+          ok: true,
+          jobs
+        });
+      }
+    );
 
-  server.tool(
-    'getCheckoutRunArtifacts',
-    'Get artifacts for a specific GitHub Actions workflow run.',
-    {
-      run_id: z.number().int().positive()
-    },
-    async ({ run_id }) => {
-      const repo = getRepoFullName();
+    server.tool(
+      'getCheckoutRunArtifacts',
+      'Get artifacts for a specific GitHub Actions workflow run.',
+      {
+        run_id: z.number().int().positive()
+      },
+      async ({ run_id }) => {
+        const repo = getRepoFullName();
 
-      const data = await githubRequest(`/repos/${repo}/actions/runs/${run_id}/artifacts`);
+        const data = await githubRequest(`/repos/${repo}/actions/runs/${run_id}/artifacts`);
 
-      const artifacts = (data?.artifacts || []).map((artifact: any) => ({
-        id: artifact.id,
-        name: artifact.name,
-        size_in_bytes: artifact.size_in_bytes,
-        expired: artifact.expired,
-        created_at: artifact.created_at,
-        expires_at: artifact.expires_at,
-        archive_download_url: artifact.archive_download_url
-      }));
+        const artifacts = (data?.artifacts || []).map((artifact: any) => ({
+          id: artifact.id,
+          name: artifact.name,
+          size_in_bytes: artifact.size_in_bytes,
+          expired: artifact.expired,
+          created_at: artifact.created_at,
+          expires_at: artifact.expires_at,
+          archive_download_url: artifact.archive_download_url
+        }));
 
-      return textResult({
-        ok: true,
-        artifacts
-      });
-    }
-  );
-});
+        return textResult({
+          ok: true,
+          artifacts
+        });
+      }
+    );
+  },
+  {},
+  {
+    basePath: '',
+    verboseLogs: true
+  }
+);
 
 async function authorized(req: Request) {
   if (!checkAuth(req)) {
