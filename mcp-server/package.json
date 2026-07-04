@@ -1,0 +1,1 @@
+{"name":"checkout-workflow-mcp","version":"1.0.0","private":true,"type":"module","scripts":{"dev":"next dev","build":"next build","start":"next start"},"dependencies":{"@modelcontextprotocol/sdk":"latest","mcp-handler":"latest","next":"latest","react":"latest","react-dom":"latest","zod":"latest"},"devDependencies":{"@types/node":"latest","typescript":"latest"}}
