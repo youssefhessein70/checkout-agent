@@ -9,12 +9,12 @@
     "start": "next start"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "latest",
-    "mcp-handler": "latest",
+    "@modelcontextprotocol/sdk": "1.26.0",
+    "mcp-handler": "1.1.0",
     "next": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "zod": "latest"
+    "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "latest",
