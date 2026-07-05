@@ -78,18 +78,27 @@ jobs:
           head -c 500 webapp-response.txt
           echo ""
 
-      - name: Patch Sutra COD safety
+      - name: Patch checkout safety and button text
         run: |
           node <<'NODE'
           const fs = require('fs');
           const path = 'src/run.js';
-          const before = "if (await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present after Cash on Delivery selection. Store stopped for payment safety.');\n  }";
-          const after = "if (!selectedPayment && await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present without a selected Cash on Delivery payment method. Store stopped for payment safety.');\n  }";
-          const source = fs.readFileSync(path, 'utf8');
-          if (!source.includes(before)) {
+          let source = fs.readFileSync(path, 'utf8');
+          const safetyBefore = "if (await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present after Cash on Delivery selection. Store stopped for payment safety.');\n  }";
+          const safetyAfter = "if (!selectedPayment && await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present without a selected Cash on Delivery payment method. Store stopped for payment safety.');\n  }";
+          if (!source.includes(safetyBefore)) {
             throw new Error('Expected COD safety block was not found');
           }
-          fs.writeFileSync(path, source.replace(before, after));
+          source = source.replace(safetyBefore, safetyAfter);
+          if (!source.includes('/أكمل\\s*الطلب/i')) {
+            const submitText = '/إكمال\\s*الطلب/i, /اكمال\\s*الطلب/i,';
+            const submitPatch = '/إكمال\\s*الطلب/i, /اكمال\\s*الطلب/i, /أكمل\\s*الطلب/i, /اكمل\\s*الطلب/i,';
+            if (!source.includes(submitText)) {
+              throw new Error('Expected place order text block was not found');
+            }
+            source = source.replace(submitText, submitPatch);
+          }
+          fs.writeFileSync(path, source);
           NODE
           node --check src/run.js
 
