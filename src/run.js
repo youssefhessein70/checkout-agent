@@ -21,7 +21,6 @@ const buyNowTexts = [/buy\s*now/i, /checkout\s*now/i, /اشتري\s*الآن/i, 
 const checkoutTexts = [/checkout/i, /go\s*to\s*checkout/i, /إتمام\s*الطلب/i, /اتمام\s*الطلب/i, /الدفع/i, /تابع\s*الدفع/i, /إكمال\s*الشراء/i, /اكمال\s*الشراء/i];
 const placeOrderTexts = [/place\s*order/i, /complete\s*order/i, /confirm\s*order/i, /submit\s*order/i, /order\s*now/i, /الطلب\s*الكامل/i, /تأكيد\s*الطلب/i, /تاكيد\s*الطلب/i, /إرسال\s*الطلب/i, /ارسال\s*الطلب/i, /إتمام\s*الطلب/i, /اتمام\s*الطلب/i, /إكمال\s*الطلب/i, /اكمال\s*الطلب/i, /تنفيذ\s*الطلب/i, /تقديم\s*الطلب/i, /اطلب\s*الآن/i, /اطلب\s*الان/i];
 const codTexts = [/cash\s*on\s*delivery/i, /\bCOD\b/i, /الدفع\s*عند\s*الاستلام/i, /عند\s*الاستلام/i, /كاش/i];
-const unsafePaymentTexts = [/card\s*number/i, /credit\s*card/i, /visa/i, /mastercard/i, /pay\s*now/i, /ادفع\s*الآن/i, /ادفع\s*الان/i, /رقم\s*البطاقة/i, /بطاقة\s*ائتمان/i];
 const outOfStockTexts = [/out\s*of\s*stock/i, /sold\s*out/i, /unavailable/i, /variant\s*sold\s*out/i, /غير\s*متوفر/i, /غير\s*متاح/i, /نفدت\s*الكمية/i, /انتهت\s*الكمية/i];
 const optionPlaceholderTexts = [/اختر/i, /اختار/i, /select/i, /choose/i, /الرجاء/i];
 
@@ -89,7 +88,6 @@ async function runStore(browser, store) {
     console.log(`${storeName}: waiting for order number from confirmation email only...`);
     const currentOrder = await waitForOrderNumberFromEmail(store, orderSubmittedAt, 120000);
     if (!currentOrder) throw new Error(`Could not find order number in confirmation email. Email is the only source of truth. ${await getPageDebugInfo(page)}`);
-    console.log(`${storeName}: email order number found: ${currentOrder}`);
 
     const currentClean = cleanOrderNumber(currentOrder);
     const previousClean = cleanOrderNumber(previousOrder);
@@ -137,13 +135,13 @@ async function tryProductAndStartCheckout(page, productUrl, origin) {
   if (await clickByTexts(page, buyNowTexts, 'Buy now', { optional: true })) {
     await waitAfterProductAction(page);
     if (await isStrictCheckoutPage(page)) return true;
-    if (await moveFromCartOrDrawerToCheckout(page, origin)) return true;
+    if (await moveFromCartOrDrawerToCheckout(page)) return true;
   }
   await waitAndDismiss(page, 1000);
   if (!(await clickAddToCart(page))) return false;
   await waitAfterProductAction(page);
   if (await isStrictCheckoutPage(page)) return true;
-  if (await moveFromCartOrDrawerToCheckout(page, origin)) return true;
+  if (await moveFromCartOrDrawerToCheckout(page)) return true;
   if (await openCartThenCheckout(page, origin)) return true;
   if (isProductPageUrl(page.url())) return false;
   return await isStrictCheckoutPage(page);
@@ -205,8 +203,8 @@ async function selectProductOptions(page) {
 
 async function selectNativeOptions(page) {
   const selects = page.locator('select:visible');
-  const selectCount = await selects.count().catch(() => 0);
-  for (let i = 0; i < selectCount; i++) {
+  const count = await selects.count().catch(() => 0);
+  for (let i = 0; i < count; i++) {
     const select = selects.nth(i);
     try {
       const options = await select.locator('option').evaluateAll((opts, placeholders) => opts.map(o => ({ value: o.value, text: o.textContent || '', disabled: o.disabled })).filter(o => o.value && !o.disabled && !placeholders.some(p => new RegExp(p.source, p.flags).test(o.text)) && !/sold|unavailable|out of stock|غير متوفر|نفدت/i.test(o.text)), optionPlaceholderTexts.map(p => ({ source: p.source, flags: p.flags })));
@@ -220,8 +218,6 @@ async function selectNativeOptions(page) {
 
 async function selectShopifyVariantFromJson(page) {
   const variant = await page.evaluate(() => {
-    const scripts = Array.from(document.querySelectorAll('script[type="application/json"], script:not([src])'));
-    const texts = scripts.map(s => s.textContent || '').filter(t => /"variants"|available/.test(t));
     function findAvailable(value) {
       if (!value) return null;
       if (Array.isArray(value)) return value.find(v => v && v.available && Array.isArray(v.options)) || null;
@@ -229,10 +225,12 @@ async function selectShopifyVariantFromJson(page) {
       if (value.product && Array.isArray(value.product.variants)) return value.product.variants.find(v => v && v.available && Array.isArray(v.options)) || null;
       return null;
     }
-    for (const text of texts) {
-      const trimmed = text.trim();
-      const candidates = [trimmed];
-      const objectMatch = trimmed.match(/\{[\s\S]*"variants"[\s\S]*\}/);
+    const scripts = Array.from(document.querySelectorAll('script[type="application/json"], script:not([src])'));
+    for (const script of scripts) {
+      const text = (script.textContent || '').trim();
+      if (!/"variants"|available/.test(text)) continue;
+      const candidates = [text];
+      const objectMatch = text.match(/\{[\s\S]*"variants"[\s\S]*\}/);
       if (objectMatch) candidates.push(objectMatch[0]);
       for (const candidate of candidates) {
         try {
@@ -265,34 +263,17 @@ async function selectVisibleOptionGroups(page) {
   const groups = page.locator('variant-radios fieldset, variant-selects fieldset, fieldset, .product-form__input, .variant-picker, [class*="variant"], [class*="swatch"]');
   const groupCount = await groups.count().catch(() => 0);
   for (let i = 0; i < Math.min(groupCount, 8); i++) {
-    const group = groups.nth(i);
-    if (await clickFirstGoodOption(group, page)) await page.waitForTimeout(600);
-  }
-  const looseOptions = page.locator('label:has(input[type="radio"]:not(:disabled)), button[data-option-value], button[data-value], [role="radio"]:not([aria-disabled="true"])');
-  const count = await looseOptions.count().catch(() => 0);
-  for (let i = 0; i < Math.min(count, 30); i++) {
-    const opt = looseOptions.nth(i);
-    if (await optionLooksSelectable(opt)) {
+    const options = groups.nth(i).locator('label:has(input[type="radio"]:not(:disabled)), button:not([disabled]), [role="radio"]:not([aria-disabled="true"])');
+    const count = await options.count().catch(() => 0);
+    for (let j = 0; j < Math.min(count, 30); j++) {
+      const opt = options.nth(j);
+      if (!(await optionLooksSelectable(opt))) continue;
       await opt.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
       await opt.click({ timeout: 2500 }).catch(() => {});
-      await page.waitForTimeout(400);
-      if (!(await isProductUnavailable(page))) break;
+      await page.waitForTimeout(500);
+      break;
     }
   }
-}
-
-async function clickFirstGoodOption(group, page) {
-  const options = group.locator('label:has(input[type="radio"]:not(:disabled)), button:not([disabled]), [role="radio"]:not([aria-disabled="true"])');
-  const count = await options.count().catch(() => 0);
-  for (let i = 0; i < Math.min(count, 30); i++) {
-    const opt = options.nth(i);
-    if (!(await optionLooksSelectable(opt))) continue;
-    await opt.scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
-    await opt.click({ timeout: 2500 }).catch(() => {});
-    await page.waitForTimeout(400);
-    return true;
-  }
-  return false;
 }
 
 async function optionLooksSelectable(locator) {
@@ -310,10 +291,8 @@ async function optionLooksSelectable(locator) {
 async function clickOptionByText(page, text) {
   const clean = String(text || '').trim();
   if (!clean) return false;
-  const patterns = [new RegExp(`^\\s*${escapeRegExp(clean)}\\s*$`, 'i'), new RegExp(escapeRegExp(clean), 'i')];
-  for (const pattern of patterns) {
-    const locators = [page.getByRole('radio', { name: pattern }), page.getByRole('button', { name: pattern }), page.locator('label, button, [role="radio"]').filter({ hasText: pattern })];
-    for (const locator of locators) {
+  for (const pattern of [new RegExp(`^\\s*${escapeRegExp(clean)}\\s*$`, 'i'), new RegExp(escapeRegExp(clean), 'i')]) {
+    for (const locator of [page.getByRole('radio', { name: pattern }), page.getByRole('button', { name: pattern }), page.locator('label, button, [role="radio"]').filter({ hasText: pattern })]) {
       try {
         if ((await locator.count()) && await optionLooksSelectable(locator.first())) {
           await locator.first().scrollIntoViewIfNeeded({ timeout: 1000 }).catch(() => {});
@@ -349,18 +328,81 @@ async function clickAddToCart(page) {
 
 async function selectPayment(page, paymentMethod) {
   const customPatterns = paymentMethod ? [new RegExp(escapeRegExp(paymentMethod), 'i')] : [];
-  const clicked = await clickByTexts(page, [...customPatterns, ...codTexts], 'Payment method', { optional: true });
-  if (!clicked) throw new Error('Cash on Delivery payment method not found. Store stopped for payment safety.');
-  return true;
+  const patterns = [...customPatterns, ...codTexts];
+  if (await clickPaymentRadioByPatterns(page, patterns)) return true;
+  if (await clickByTexts(page, patterns, 'Payment method', { optional: true })) return true;
+  if (await isCodVisible(page)) {
+    console.log('Cash on Delivery is visible and appears to be the only/non-clickable payment option.');
+    return true;
+  }
+  throw new Error('Cash on Delivery payment method not found. Store stopped for payment safety.');
+}
+
+async function clickPaymentRadioByPatterns(page, patterns) {
+  const radios = page.locator('input[type="radio"]');
+  const count = await radios.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 80); i++) {
+    const radio = radios.nth(i);
+    try {
+      const meta = await radio.evaluate(node => {
+        const id = node.id || '';
+        const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+        const wrappingLabel = node.closest('label');
+        return [id, node.name, node.value, node.getAttribute('aria-label'), node.getAttribute('data-testid'), label && label.innerText, wrappingLabel && wrappingLabel.innerText, node.closest('[role="radio"], .radio-wrapper, .payment-method, [data-payment-method]')?.innerText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+      });
+      if (!patterns.some(pattern => pattern.test(meta))) continue;
+      await radio.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+      await radio.check({ timeout: 5000 }).catch(async () => {
+        await radio.click({ timeout: 5000 }).catch(async () => {
+          await radio.evaluate(node => {
+            node.checked = true;
+            node.dispatchEvent(new Event('input', { bubbles: true }));
+            node.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+        });
+      });
+      console.log(`Selected payment radio: ${meta.slice(0, 160)}`);
+      return true;
+    } catch (_) {}
+  }
+  return false;
+}
+
+async function getSelectedPaymentMeta(page) {
+  return await page.locator('input[type="radio"]:checked').evaluateAll(nodes => nodes.map(node => {
+    const id = node.id || '';
+    const label = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+    const wrappingLabel = node.closest('label');
+    return [id, node.name, node.value, node.getAttribute('aria-label'), node.getAttribute('data-testid'), label && label.innerText, wrappingLabel && wrappingLabel.innerText, node.closest('[role="radio"], .radio-wrapper, .payment-method, [data-payment-method]')?.innerText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  })).then(items => items.find(meta => /payment|basic|الدفع|فيزا|visa|card|cod|استلام/i.test(meta)) || '').catch(() => '');
 }
 
 async function assertSafeCodSelected(page) {
+  const codVisible = await isCodVisible(page);
+  if (!codVisible) throw new Error('Cash on Delivery is not visible on checkout. Store stopped for payment safety.');
+  const selectedPayment = await getSelectedPaymentMeta(page);
+  if (selectedPayment && !codTexts.some(pattern => pattern.test(selectedPayment))) {
+    throw new Error(`Selected payment method is not Cash on Delivery: ${selectedPayment.slice(0, 160)}`);
+  }
+  if (await hasVisibleCardFields(page)) {
+    throw new Error('Visible card fields are present after Cash on Delivery selection. Store stopped for payment safety.');
+  }
+  return true;
+}
+
+async function isCodVisible(page) {
   const text = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
   const compact = String(text || '').replace(/\s+/g, ' ');
-  if (!codTexts.some(pattern => pattern.test(compact))) throw new Error('Cash on Delivery is not visible on checkout. Store stopped for payment safety.');
-  const unsafeFieldVisible = await page.locator('input[name*="card" i], input[id*="card" i], input[autocomplete="cc-number"]').first().isVisible({ timeout: 1000 }).catch(() => false);
-  const onlyUnsafeVisible = unsafePaymentTexts.some(pattern => pattern.test(compact)) && !codTexts.some(pattern => pattern.test(compact));
-  if (unsafeFieldVisible || onlyUnsafeVisible) throw new Error('Checkout appears to require card payment. Store stopped for payment safety.');
+  return codTexts.some(pattern => pattern.test(compact));
+}
+
+async function hasVisibleCardFields(page) {
+  const fields = page.locator('input[name*="card" i], input[id*="card" i], input[autocomplete="cc-number"], input[autocomplete="cc-exp"], input[autocomplete="cc-csc"], iframe[name*="card" i], iframe[title*="card" i]');
+  const count = await fields.count().catch(() => 0);
+  for (let i = 0; i < Math.min(count, 20); i++) {
+    if (await fields.nth(i).isVisible({ timeout: 500 }).catch(() => false)) return true;
+  }
+  return false;
 }
 
 async function clickPlaceOrder(page) {
@@ -379,7 +421,7 @@ async function clickPlaceOrder(page) {
   throw new Error('Place order button not found');
 }
 
-async function moveFromCartOrDrawerToCheckout(page, origin) {
+async function moveFromCartOrDrawerToCheckout(page) {
   for (let attempt = 1; attempt <= 4; attempt++) {
     if (await isStrictCheckoutPage(page)) return true;
     await waitAndDismiss(page, 1000);
@@ -440,14 +482,7 @@ async function selectShippingProvince(page, store) {
       const select = selects.nth(i);
       try {
         if (!(await select.isVisible({ timeout: 500 }).catch(() => false))) continue;
-        const meta = await select.evaluate(node => {
-          const id = node.getAttribute('id') || '';
-          const name = node.getAttribute('name') || '';
-          const autocomplete = node.getAttribute('autocomplete') || '';
-          const aria = node.getAttribute('aria-label') || '';
-          const optionsText = Array.from(node.options || []).map(o => o.textContent || '').join(' ');
-          return [id, name, autocomplete, aria, optionsText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-        });
+        const meta = await select.evaluate(node => [node.id, node.name, node.getAttribute('autocomplete'), node.getAttribute('aria-label'), Array.from(node.options || []).map(o => o.textContent || '').join(' ')].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim());
         if (!/zone|province|state|address-level1|محافظة|القاهرة|الإسكندرية|الجيزة/i.test(meta)) continue;
         const options = await select.locator('option').evaluateAll(opts => opts.map(o => ({ value: o.value, text: (o.textContent || '').replace(/\s+/g, ' ').trim(), disabled: o.disabled })));
         const validOptions = options.filter(o => o.value && !o.disabled && !/select|choose|اختر|اختار|province|state|الرجاء/i.test(o.text));
@@ -500,22 +535,7 @@ async function isProductUnavailable(page) {
   const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
   const hasOutText = outOfStockTexts.some(p => p.test(bodyText));
   const hasBuyOrCart = await hasClickableText(page, [...buyNowTexts, ...addToCartTexts]);
-  if (hasOutText && !hasBuyOrCart) return true;
-  const buttons = page.locator('button, a[role="button"], input[type="button"], input[type="submit"]');
-  const count = await buttons.count().catch(() => 0);
-  let actionButtons = 0;
-  let enabledActions = 0;
-  for (let i = 0; i < Math.min(count, 100); i++) {
-    const el = buttons.nth(i);
-    try {
-      const label = await el.evaluate(node => [node.innerText, node.textContent, node.value, node.getAttribute('aria-label'), node.getAttribute('title')].filter(Boolean).join(' '));
-      if (![...buyNowTexts, ...addToCartTexts].some(p => p.test(label))) continue;
-      actionButtons += 1;
-      const disabled = await el.evaluate(node => !!node.disabled || node.getAttribute('aria-disabled') === 'true' || /disabled|unavailable|sold/i.test(node.className || ''));
-      if (!disabled && await el.isVisible({ timeout: 300 }).catch(() => false)) enabledActions += 1;
-    } catch (_) {}
-  }
-  return actionButtons > 0 && enabledActions === 0;
+  return hasOutText && !hasBuyOrCart;
 }
 
 async function hasClickableText(page, patterns) {
@@ -559,8 +579,7 @@ async function waitAndDismiss(page, ms) {
 }
 
 async function dismissPopups(page) {
-  const patterns = [/accept/i, /agree/i, /close/i, /قبول/i, /موافق/i, /اغلاق/i, /إغلاق/i, /^x$/i, /^×$/i];
-  for (const pattern of patterns) {
+  for (const pattern of [/accept/i, /agree/i, /close/i, /قبول/i, /موافق/i, /اغلاق/i, /إغلاق/i, /^x$/i, /^×$/i]) {
     try {
       const locator = page.locator('button, a, [role="button"]').filter({ hasText: pattern });
       if (await locator.count()) await locator.first().click({ timeout: 1500 }).catch(() => {});
