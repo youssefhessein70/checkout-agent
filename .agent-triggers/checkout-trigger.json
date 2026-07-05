@@ -1,6 +1,5 @@
-
 {
   "only_store": "",
   "confirmed": "true",
-  "trigger_id": "initial"
+  "trigger_id": "test-1"
 }
