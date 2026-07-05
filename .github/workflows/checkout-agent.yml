@@ -1,4 +1,4 @@
-﻿name: Checkout Agent
+name: Checkout Agent
 
 on:
   workflow_dispatch:
@@ -12,9 +12,15 @@ on:
         required: true
         default: "false"
 
+  push:
+    branches:
+      - main
+    paths:
+      - ".agent-triggers/checkout-trigger.json"
+
 jobs:
   run-checkout-agent:
-    if: ${{ github.event.inputs.confirmed == 'true' }}
+    if: ${{ github.event_name == 'push' || github.event.inputs.confirmed == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -25,13 +31,32 @@ jobs:
       WEBAPP_URL: ${{ secrets.WEBAPP_URL }}
       HEADLESS: "false"
       SLOWMO_MS: "1000"
-      ONLY_STORE: ${{ github.event.inputs.only_store }}
+      ONLY_STORE: ""
       DEBUG_SCREENSHOTS: "true"
       DEBUG_DIR: "debug-screenshots"
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Load manual trigger input
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "ONLY_STORE=${{ github.event.inputs.only_store }}" >> "$GITHUB_ENV"
+
+      - name: Load agent trigger input
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          node -e "const fs=require('fs'); const j=JSON.parse(fs.readFileSync('.agent-triggers/checkout-trigger.json','utf8')); console.log('ONLY_STORE=' + (j.only_store || ''))" >> "$GITHUB_ENV"
+
+      - name: Show selected store
+        run: |
+          echo "ONLY_STORE=$ONLY_STORE"
+          if [ -z "$ONLY_STORE" ]; then
+            echo "Running all active stores from sheet"
+          else
+            echo "Running only store: $ONLY_STORE"
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -55,6 +80,7 @@ jobs:
 
       - name: Run checkout agent
         run: xvfb-run -a npm run run
+
       - name: Upload debug screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -63,7 +89,3 @@ jobs:
           path: debug-screenshots/
           if-no-files-found: ignore
           retention-days: 1
-
-
-
-
