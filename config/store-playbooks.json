@@ -1,0 +1,101 @@
+{
+  "Snacks Roastery": {
+    "website_url": "https://snacks-roastery.com/",
+    "product_url": "https://snacks-roastery.com/collections/all-products/products/bonbon-tufeni",
+    "platform": "shopify-like Arabic RTL checkout",
+    "last_inspected_at": "2026-07-05T11:30:00Z",
+    "last_known_status": "ready_for_execution",
+    "product_strategy": {
+      "use_product_url_from_sheet": true,
+      "selected_product": "بونبون توفينيل",
+      "variant_selection": "select first available weight variant; default visible option is 125 جرام",
+      "notes": [
+        "Collections page shows 133 in-stock products.",
+        "Selected low-value in-stock product at EGP 28 to reduce test order impact."
+      ]
+    },
+    "checkout_flow": {
+      "add_to_cart": {
+        "selectors": [],
+        "text_fallbacks": [
+          "أضف إلى السلة",
+          "اضف الى السلة",
+          "Add to cart"
+        ]
+      },
+      "cart_checkout": {
+        "selectors": [],
+        "text_fallbacks": [
+          "الدفع",
+          "إتمام الطلب",
+          "اتمام الطلب",
+          "Checkout"
+        ]
+      },
+      "customer_fields": {
+        "name": [],
+        "first_name": [],
+        "last_name": [],
+        "phone": [],
+        "email": [],
+        "address": [],
+        "city": [],
+        "governorate": [],
+        "country": []
+      },
+      "shipping": {
+        "selectors": [],
+        "text_fallbacks": [
+          "توصيل للمنزل",
+          "Home delivery",
+          "Shipping",
+          "Delivery"
+        ]
+      },
+      "payment": {
+        "preferred": "Cash on Delivery",
+        "arabic_names": [
+          "الدفع عند الاستلام",
+          "الدفع عند الاستلام (COD)",
+          "كاش عند الاستلام"
+        ],
+        "english_names": [
+          "Cash on Delivery",
+          "COD",
+          "Pay on Delivery"
+        ],
+        "card_names": [
+          "الدفع بالفيزا",
+          "Visa",
+          "Mastercard",
+          "Card",
+          "Credit card",
+          "Debit card"
+        ],
+        "safety_rule": "Do not fail only because card payment or card logos are visible. Continue only when Cash on Delivery is selected or is the only available non-card option. Never enter card data."
+      },
+      "place_order": {
+        "selectors": [],
+        "text_fallbacks": [
+          "تنفيذ الطلب",
+          "تأكيد الطلب",
+          "إتمام الطلب",
+          "ارسال الطلب",
+          "إرسال الطلب",
+          "Place order",
+          "Complete order"
+        ]
+      },
+      "confirmation": {
+        "order_number_source": "confirmation_email_only",
+        "notes": [
+          "Thank-you page is evidence only; final order number must come from confirmation email."
+        ]
+      }
+    },
+    "notes": [
+      "Homepage and collections page confirm Arabic RTL Shopify-like storefront.",
+      "Product page shows بونبون توفينيل, variant 125 جرام, price EGP 28, and add-to-cart text أضف إلى السلة."
+    ]
+  }
+}
