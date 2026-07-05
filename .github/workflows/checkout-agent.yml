@@ -78,6 +78,21 @@ jobs:
           head -c 500 webapp-response.txt
           echo ""
 
+      - name: Patch Sutra COD safety
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const path = 'src/run.js';
+          const before = "if (await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present after Cash on Delivery selection. Store stopped for payment safety.');\n  }";
+          const after = "if (!selectedPayment && await hasVisibleCardFields(page)) {\n    throw new Error('Visible card fields are present without a selected Cash on Delivery payment method. Store stopped for payment safety.');\n  }";
+          const source = fs.readFileSync(path, 'utf8');
+          if (!source.includes(before)) {
+            throw new Error('Expected COD safety block was not found');
+          }
+          fs.writeFileSync(path, source.replace(before, after));
+          NODE
+          node --check src/run.js
+
       - name: Run checkout agent
         run: xvfb-run -a npm run run
 
