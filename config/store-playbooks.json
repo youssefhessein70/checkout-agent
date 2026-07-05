@@ -3,8 +3,8 @@
     "website_url": "https://snacks-roastery.com/",
     "product_url": "https://snacks-roastery.com/collections/all-products/products/bonbon-tufeni",
     "platform": "shopify-like Arabic RTL checkout",
-    "last_inspected_at": "2026-07-05T11:30:00Z",
-    "last_known_status": "ready_for_execution",
+    "last_inspected_at": "2026-07-05T11:59:00Z",
+    "last_known_status": "fixed_pending_retry",
     "product_strategy": {
       "use_product_url_from_sheet": true,
       "selected_product": "بونبون توفينيل",
@@ -75,8 +75,12 @@
         "safety_rule": "Do not fail only because card payment or card logos are visible. Continue only when Cash on Delivery is selected or is the only available non-card option. Never enter card data."
       },
       "place_order": {
-        "selectors": [],
+        "selectors": [
+          "button#checkout-pay-button"
+        ],
         "text_fallbacks": [
+          "أكمل الطلب",
+          "اكمل الطلب",
           "تنفيذ الطلب",
           "تأكيد الطلب",
           "إتمام الطلب",
@@ -95,7 +99,8 @@
     },
     "notes": [
       "Homepage and collections page confirm Arabic RTL Shopify-like storefront.",
-      "Product page shows بونبون توفينيل, variant 125 جرام, price EGP 28, and add-to-cart text أضف إلى السلة."
+      "Product page shows بونبون توفينيل, variant 125 جرام, price EGP 28, and add-to-cart text أضف إلى السلة.",
+      "2026-07-05 run reached checkout, selected Cash on Delivery, and failed because final submit button text was أكمل الطلب. Added this text to place-order fallback."
     ]
   }
 }
