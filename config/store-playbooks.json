@@ -4,7 +4,7 @@
     "product_url": "https://snacks-roastery.com/collections/all-products/products/bonbon-tufeni",
     "platform": "shopify-like Arabic RTL checkout",
     "last_inspected_at": "2026-07-05T11:59:00Z",
-    "last_validated_at": "2026-07-08T16:07:05Z",
+    "last_validated_at": "2026-07-08T20:36:26Z",
     "last_known_status": "validated_success",
     "product_strategy": {
       "use_product_url_from_sheet": true,
@@ -106,7 +106,8 @@
       "2026-07-05 run reached checkout, selected Cash on Delivery, and failed because final submit button text was أكمل الطلب. Added this text to place-order fallback.",
       "2026-07-08 run RUN-20260708130458 succeeded and confirmation email produced order 41459.",
       "2026-07-08 run RUN-20260708151503 succeeded and confirmation email produced order 41465.",
-      "2026-07-08 run RUN-20260708160448 succeeded and confirmation email produced order 41467."
+      "2026-07-08 run RUN-20260708160448 succeeded and confirmation email produced order 41467.",
+      "2026-07-08 run RUN-20260708203419 succeeded and confirmation email produced order 41477."
     ]
   }
 }
